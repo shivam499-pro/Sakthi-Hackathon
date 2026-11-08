@@ -104,25 +104,25 @@ flowchart TD
         DBTx --> TableOrders
         DBTx --> TableParts
         DBTx --> TableEvents
-        DBTx -->|On Terminal Result (PASS/NG)| TableOutbox
+        DBTx -->|Terminal Result| TableOutbox
         AttemptManager --> TableResetAudit
         RetryEndpoint --> TableRetryAudit
     end
 
     subgraph WorkerLayer ["Asynchronous Hardware Subsystem"]
         OutboxWorker["ArduinoOutboxWorker (Background Daemon Thread)"]
-        TableOutbox -.->|FIFO Atomic Claim (outbox_id ASC)| OutboxWorker
+        TableOutbox -.->|FIFO Queue Claim| OutboxWorker
         SerialTransceiver["PySerial UART Transceiver (main.send_arduino_result)"]
         OutboxWorker --> SerialTransceiver
     end
 
     subgraph HardwareLayer ["Physical Hardware Interface"]
         ArduinoUno["Arduino Uno R3 (COM5 @ 9600 Baud UART)"]
-        SerialTransceiver <-->|"Command: PASS / NG / HOLD\nACK: PASS: Packing Approved\n     HOLD: Packing Not Approved"| ArduinoUno
+        SerialTransceiver <-->|UART Serial Protocol| ArduinoUno
     end
 
-    OutboxWorker -->|Update Status: CONFIRMED / UNCONFIRMED| TableOutbox
-    OutboxWorker -->|Update Communication Status| TableOrders
+    OutboxWorker -->|Update Outbox Status| TableOutbox
+    OutboxWorker -->|Update Order Status| TableOrders
     OrderEndpoint --> TableOrders
     HistoryEndpoint --> TableEvents
 ```
