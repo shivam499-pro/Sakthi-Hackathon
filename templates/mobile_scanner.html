@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#101216">
+  <title>Smart Export Packing Verification</title>
+  <link rel="stylesheet" href="/static/css/mobile_scanner.css">
+  <!-- html5-qrcode scanner library (Apache-2.0 License by Minhaz Himel) -->
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+</head>
+<body>
+  <div class="app-container">
+    <!-- Header: Industrial Context -->
+    <header class="app-header">
+      <div class="header-top">
+        <div class="header-branding">
+          <span class="system-tag">PS-016 EXPORT INSPECTION</span>
+          <h1 class="system-title">Smart Packing Verification</h1>
+        </div>
+        <div class="connection-status" id="connectionBadge">
+          <span class="status-dot"></span>
+          <span id="connectionLabel">Online</span>
+        </div>
+      </div>
+      <div class="order-context-card" id="orderContextCard">
+        <div class="context-grid">
+          <div class="context-item">
+            <span class="context-label">Packing Order</span>
+            <span class="context-val mono" id="ctxPackingOrderId">PO-001</span>
+          </div>
+          <div class="context-item">
+            <span class="context-label">Box ID</span>
+            <span class="context-val mono" id="ctxBoxId">BOX-001</span>
+          </div>
+          <div class="context-item">
+            <span class="context-label">Order Ref</span>
+            <span class="context-val mono" id="ctxOrderId">ORD-2026-001</span>
+          </div>
+          <div class="context-item">
+            <span class="context-label">Attempt</span>
+            <span class="context-val mono" id="ctxAttemptNum">Attempt #1</span>
+          </div>
+          <div class="context-item full-width">
+            <span class="context-label">Product Description</span>
+            <span class="context-val" id="ctxProductDesc">Automotive Component Export Box</span>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- Insecure Origin Warning Banner (HTTP Camera Security) -->
+    <div class="security-banner hidden" id="securityBanner">
+      <div class="security-content">
+        <span class="security-title">Camera Security Notice</span>
+        <p class="security-desc">
+          Mobile browsers strictly restrict live camera access to secure contexts (HTTPS or localhost).
+          If accessing over local Wi-Fi HTTP, use Android USB debugging (<code>adb reverse tcp:5000 tcp:5000</code>)
+          or use the manual/wedge barcode input below.
+        </p>
+      </div>
+    </div>
+
+    <!-- Notification Toast / Alert -->
+    <div class="notification-banner hidden" id="notificationBanner">
+      <span id="notificationMessage"></span>
+      <button class="notification-close" id="notificationClose" type="button" aria-label="Close notification">&times;</button>
+    </div>
+
+    <!-- Signature Verification Status Card -->
+    <section class="decision-section" aria-label="Verification Result">
+      <div class="decision-card status-hold" id="decisionCard">
+        <div class="decision-badge" id="decisionBadge">HOLD</div>
+        <div class="decision-meta">
+          <div class="decision-state-label" id="decisionStateLabel">Packing On Hold</div>
+          <div class="decision-guidance" id="decisionGuidance">Review incomplete packing requirements below.</div>
+          <div class="decision-timestamp mono" id="decisionTimestamp">Last updated: --</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Supervisor Quarantine & Reset Section (Visible only when in NG state) -->
+    <section class="supervisor-section hidden" id="supervisorSection" aria-label="Supervisor Quarantine Action">
+      <div class="supervisor-card">
+        <div class="supervisor-header">
+          <span class="supervisor-title">Supervisor Authorization Required</span>
+          <span class="supervisor-tag">Quarantine Lock Active</span>
+        </div>
+        <p class="supervisor-desc">
+          Current packing attempt <span class="mono bold" id="spvAttemptId">--</span> is rejected (NG).
+          Operator scans are locked. Enter supervisor credentials and root-cause reason to close this attempt and launch a clean packing attempt.
+        </p>
+        <form id="supervisorResetForm" class="supervisor-form">
+          <div class="form-group">
+            <label class="form-label" for="spvPinInput">Supervisor Authorization PIN</label>
+            <input class="form-input mono" type="password" id="spvPinInput" placeholder="Enter Supervisor PIN" autocomplete="off" required>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="spvReasonInput">Reason / Quarantine Action</label>
+            <input class="form-input" type="text" id="spvReasonInput" placeholder="e.g. Quarantined defective PART-A; re-packing Box 001" autocomplete="off" required>
+          </div>
+          <button class="btn btn-primary full-width" id="spvSubmitBtn" type="submit">Authorize &amp; Start Fresh Attempt</button>
+        </form>
+      </div>
+    </section>
+
+    <!-- Hardware Signal Status Card (Phase 4B) -->
+    <section class="hardware-section hidden" id="hardwareSection" aria-label="Arduino Hardware Signal Status">
+      <div class="hardware-card">
+        <div class="hardware-header">
+          <span class="hardware-title">Arduino Signal Status</span>
+          <span class="hardware-status-badge" id="hwStatusBadge">--</span>
+        </div>
+        <p class="hardware-desc" id="hwStatusDesc">
+          Waiting for a terminal PASS or NG result before dispatching.
+        </p>
+        <p class="hardware-notice">
+          <strong>Note:</strong> <em>CONFIRMED</em> means the expected serial acknowledgement was received from the Arduino over UART.
+          It does not confirm physical LED or gate actuation.
+        </p>
+
+        <!-- Supervisor Retry Form (visible only when UNCONFIRMED and retries remain) -->
+        <div class="hardware-retry-block hidden" id="hwRetryBlock">
+          <div class="hardware-retry-header">
+            <span class="hardware-retry-label">Manual Retry Authorization</span>
+            <span class="hardware-retry-count mono" id="hwRetryCount"></span>
+          </div>
+          <form id="hwRetryForm" class="supervisor-form">
+            <div class="form-group">
+              <label class="form-label" for="hwRetryPinInput">Supervisor PIN</label>
+              <input class="form-input mono" type="password" id="hwRetryPinInput" placeholder="Enter Supervisor PIN" autocomplete="off" required>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="hwRetryReasonInput">Retry Reason</label>
+              <input class="form-input" type="text" id="hwRetryReasonInput" placeholder="e.g. COM5 reconnected after cable replacement" autocomplete="off" required>
+            </div>
+            <button class="btn btn-warning full-width" id="hwRetrySubmitBtn" type="submit">Authorize Hardware Retry</button>
+          </form>
+        </div>
+      </div>
+    </section>
+
+    <!-- Overall Packing Progress Summary -->
+    <section class="progress-section" aria-label="Packing Progress">
+      <div class="progress-header">
+        <span class="section-heading">BOM Fulfillment Progress</span>
+        <span class="progress-numbers mono" id="progressNumbers">0 / 8 PCS</span>
+      </div>
+      <div class="progress-bar-track">
+        <div class="progress-bar-fill" id="progressBarFill" style="width: 0%;"></div>
+      </div>
+    </section>
+
+    <!-- Part Requirements Matrix -->
+    <section class="bom-section" aria-label="Part Requirements">
+      <div class="section-header-row">
+        <span class="section-heading">Required Components</span>
+        <button class="refresh-btn" id="refreshOrderBtn" type="button" title="Refresh order status">Refresh</button>
+      </div>
+      <div class="bom-table-container">
+        <table class="bom-table">
+          <thead>
+            <tr>
+              <th>Part</th>
+              <th>Variant</th>
+              <th class="num-col">Req</th>
+              <th class="num-col">Scan</th>
+              <th class="num-col">Rem</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="bomTableBody">
+            <tr>
+              <td colspan="6" class="loading-row">Loading part requirements...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Scanner Controls Section -->
+    <section class="scanner-section" aria-label="Barcode and QR Scanner">
+      <div class="scanner-mode-tabs">
+        <button class="tab-btn active" id="tabCameraBtn" type="button">Camera Scanner</button>
+        <button class="tab-btn" id="tabManualBtn" type="button">Manual / Wedge Input</button>
+      </div>
+
+      <!-- Tab A: Camera Scanning Pane -->
+      <div class="scanner-pane active" id="paneCamera">
+        <div class="camera-controls">
+          <button class="btn btn-primary" id="startCameraBtn" type="button">Open Camera</button>
+          <button class="btn btn-secondary hidden" id="stopCameraBtn" type="button">Close Camera</button>
+        </div>
+
+        <div class="viewfinder-wrapper hidden" id="viewfinderWrapper">
+          <div id="reader"></div>
+          <div class="viewfinder-crosshair"></div>
+          <div class="viewfinder-status" id="viewfinderStatus">Position barcode inside viewfinder...</div>
+        </div>
+
+        <div class="camera-error-box hidden" id="cameraErrorBox">
+          <span class="error-title">Camera Unavailable</span>
+          <span class="error-msg" id="cameraErrorMsg">Unable to access camera. Check device permissions or use manual entry.</span>
+        </div>
+      </div>
+
+      <!-- Tab B: Manual / Wedge Scanning Pane -->
+      <div class="scanner-pane" id="paneManual">
+        <form class="manual-form" id="manualScanForm">
+          <div class="form-group">
+            <label class="form-label" for="manualPayloadInput">Raw Barcode Payload (Project Pipe Format)</label>
+            <input class="form-input mono" type="text" id="manualPayloadInput" placeholder="PART-A|LH|1" autocomplete="off" spellcheck="false">
+            <span class="input-hint">Format: <code>PART_ID|VARIANT|QUANTITY</code></span>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group flex-1">
+              <label class="form-label" for="manualPartSelect">Quick Part Select</label>
+              <select class="form-select" id="manualPartSelect">
+                <option value="">-- Choose Part --</option>
+                <option value="PART-A">PART-A</option>
+                <option value="PART-B">PART-B</option>
+                <option value="PART-C">PART-C</option>
+              </select>
+            </div>
+            <div class="form-group flex-1">
+              <label class="form-label" for="manualVariantSelect">Variant</label>
+              <select class="form-select" id="manualVariantSelect">
+                <option value="LH">LH</option>
+                <option value="RH">RH</option>
+                <option value="Standard">Standard</option>
+              </select>
+            </div>
+            <div class="form-group flex-1">
+              <label class="form-label" for="manualQtyInput">Qty</label>
+              <input class="form-input mono" type="number" id="manualQtyInput" value="1" min="1" max="10">
+            </div>
+          </div>
+
+          <button class="btn btn-primary full-width" id="manualSubmitBtn" type="submit">Submit Barcode Scan</button>
+        </form>
+      </div>
+
+      <!-- Staged Scan Confirmation Card (Operator Double-Check Gate) -->
+      <div class="staged-card hidden" id="stagedScanCard">
+        <div class="staged-header">
+          <span class="staged-title">Scanned Barcode Decoded</span>
+          <span class="staged-tag">Awaiting Confirmation</span>
+        </div>
+        <div class="staged-details">
+          <div class="staged-row">
+            <span class="staged-label">Raw Payload:</span>
+            <span class="staged-val mono" id="stagedRaw">--</span>
+          </div>
+          <div class="staged-grid">
+            <div class="staged-cell">
+              <span class="staged-label">Part ID</span>
+              <span class="staged-val mono bold" id="stagedPart">--</span>
+            </div>
+            <div class="staged-cell">
+              <span class="staged-label">Variant</span>
+              <span class="staged-val mono bold" id="stagedVariant">--</span>
+            </div>
+            <div class="staged-cell">
+              <span class="staged-label">Quantity</span>
+              <span class="staged-val mono bold" id="stagedQty">--</span>
+            </div>
+          </div>
+        </div>
+        <div class="staged-actions">
+          <button class="btn btn-confirm" id="confirmScanBtn" type="button">Confirm &amp; Log Scan</button>
+          <button class="btn btn-cancel" id="cancelScanBtn" type="button">Discard</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Recent Scan History Section -->
+    <section class="history-section" aria-label="Scan History">
+      <div class="section-header-row">
+        <span class="section-heading">Recent Scan Events</span>
+        <span class="history-count mono" id="historyCount">0 events</span>
+      </div>
+      <div class="history-list" id="historyList">
+        <div class="empty-history">No scan events recorded yet.</div>
+      </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="app-footer">
+      <span>Smart Export Packing Verification &bull; Mobile Station</span>
+    </footer>
+  </div>
+
+  <script src="/static/js/mobile_scanner.js"></script>
+</body>
+</html>
